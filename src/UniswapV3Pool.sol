@@ -2,11 +2,10 @@ pragma solidity ^0.8.14;
 
 import "./interfaces/IERC20.sol";
 import "./interfaces/IUniswapV3MintCallback.sol";
+import "./interfaces/IUniswapV3SwapCallback.sol";
 
 import "./lib/Tick.sol";
 import "./lib/Position.sol";
-
-import "forge-std/console.sol";
 
 contract UniswapV3Pool {
     //using...for 将某个库的函数扩展到特定数据类型上。这使得你可以像调用类型的方法一样，直接调用库中的函数，从而提高代码的可读性和可维护性
@@ -43,6 +42,12 @@ contract UniswapV3Pool {
     }
     Slot0 public slot0;
 
+    struct CallbackData {
+        address token0;
+        address token1;
+        address payer;
+    }
+
     event Mint(
         address sender,
         address indexed owner,
@@ -51,6 +56,16 @@ contract UniswapV3Pool {
         uint128 amount,
         uint256 amount0,
         uint256 amount1
+    );
+
+    event Swap(
+        address indexed sender,
+        address indexed recipient,
+        int256 amount0,
+        int256 amount1,
+        uint160 sqrtPriceX96,
+        uint128 liquidity,
+        int24 tick
     );
 
     constructor(
@@ -121,6 +136,49 @@ contract UniswapV3Pool {
             amount,
             amount0,
             amount1
+        );
+    }
+
+    //recipient 代币的接收者
+    //返回在交换中使用的代币数量(可以是正数/负数)
+    function swap(
+        address recipient,
+        bytes calldata data
+    ) public returns (int256 amount0, int256 amount1) {
+        // 用 42 USDC 购买 ETH
+
+        //1.找到目标价格和tick
+        //2.计算代币数量
+        int24 nextTick = 85184;
+        uint160 nextPrice = 5604469350942327889444743441197;
+
+        amount0 = -0.008396714242162444 ether;
+        amount1 = 42 ether;
+
+        //3.更新当前的tick和sqrtP
+        (slot0.tick, slot0.sqrtPriceX96) = (nextTick, nextPrice);
+
+        //4.合约将代币发送给接收者
+        IERC20(token0).transfer(recipient, uint256(-amount0));
+        //5.调用者将输入金额转入合约
+        uint256 balance1Before = balance1();
+        IUniswapV3SwapCallback(msg.sender).uniswapV3SwapCallback(
+            amount0,
+            amount1,
+            data
+        );
+
+        if (balance1Before + uint256(amount1) < balance1())
+            revert InsufficientInputAmount();
+
+        emit Swap(
+            msg.sender,
+            recipient,
+            amount0,
+            amount1,
+            slot0.sqrtPriceX96,
+            liquidity,
+            slot0.tick
         );
     }
 
